@@ -8,32 +8,33 @@ struct MainView: View {
     @State private var saveError: Error?
     @FocusState private var isInputFocused: Bool
     @State private var backgroundOpacity: Double = 1.0
-    @State private var userGeneratedImages: [UIImage] = [] // Store generated wallpapers
-    
+
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
                 ZStack(alignment: .top) {
-                    // Background Image (either default or generated)
+                    // Background Image
                     Group {
-                        if let generatedImage = viewModel.generatedImage {
-                            Image(uiImage: generatedImage)
-                                .resizable()
-                                .scaledToFill() // Ensure image fills entire view
-                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
-                        } else if let selectedBackground = viewModel.selectedBackground {
-                            Image(selectedBackground.imageName ?? "sunset_mountain")
-                                .resizable()
-                                .scaledToFill() // Ensure image fills entire view
-                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
+                        if let selectedBackground = viewModel.selectedBackground {
+                            if let image = selectedBackground.image {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .ignoresSafeArea()
+                            } else if let imageName = selectedBackground.imageName {
+                                Image(imageName)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .ignoresSafeArea()
+                            }
                         } else {
-                            Image("sunset_mountain") // Default image
+                            Image("sunset_mountain")
                                 .resizable()
-                                .scaledToFill() // Ensure image fills entire view
-                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
+                                .scaledToFill()
+                                .ignoresSafeArea()
                         }
                     }
-                    .frame(width: geometry.size.width, height: geometry.size.height) // Frame ensures the image fills the geometry size
+                    .frame(width: geometry.size.width, height: geometry.size.height)
 
                     // Semi-transparent overlay for better text visibility
                     Color.black.opacity(0.3)
@@ -103,7 +104,7 @@ struct MainView: View {
                 }
                 
                 // Display generated images in a separate section
-                if !userGeneratedImages.isEmpty {
+                if !viewModel.userGeneratedBackgrounds.isEmpty {
                     VStack(alignment: .leading) {
                         Text("Your Generated Wallpapers")
                             .font(.headline)
@@ -111,13 +112,22 @@ struct MainView: View {
                         
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                ForEach(userGeneratedImages, id: \.self) { image in
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 150, height: 150)
-                                        .cornerRadius(10)
-                                        .shadow(radius: 5)
+                                ForEach(viewModel.userGeneratedBackgrounds) { backgroundStyle in
+                                    if let image = backgroundStyle.image {
+                                        Image(uiImage: image)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fill)
+                                            .frame(width: 150, height: 150)
+                                            .cornerRadius(10)
+                                            .shadow(radius: 5)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .stroke(Color.white.opacity(0.5), lineWidth: 2)
+                                            )
+                                            .onTapGesture {
+                                                viewModel.selectedBackground = backgroundStyle
+                                            }
+                                    }
                                 }
                             }
                             .padding(.horizontal)
@@ -127,7 +137,17 @@ struct MainView: View {
                 }
             }
             .sheet(isPresented: $showBackgroundSelection) {
-                BackgroundSelectionView(selectedBackground: $viewModel.selectedBackground, userGeneratedImages: $userGeneratedImages)
+                BackgroundSelectionView(
+                    selectedBackground: Binding(
+                        get: { viewModel.selectedBackground },
+                        set: { viewModel.selectedBackground = $0 }
+                    ),
+                    userGeneratedBackgrounds: Binding(
+                        get: { viewModel.userGeneratedBackgrounds },
+                        set: { viewModel.userGeneratedBackgrounds = $0 }
+                    ),
+                    removeGeneratedImage: viewModel.removeGeneratedImage(withId:)
+                )
             }
             .alert(isPresented: $viewModel.showErrorAlert) {
                 Alert(title: Text("Error"), message: Text(viewModel.errorMessage), dismissButton: .default(Text("OK")))
@@ -139,9 +159,9 @@ struct MainView: View {
                     return Alert(title: Text("Success"), message: Text("Image saved to Photo Library."), dismissButton: .default(Text("OK")))
                 }
             }
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("") // Empty title to prevent showing the text
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle("") // Empty title to prevent showing the text
     }
     
     private func generateWallpaperWithAnimation() async {
@@ -155,10 +175,7 @@ struct MainView: View {
             backgroundOpacity = 1.0
         }
         
-        // After generating the wallpaper, add it to the user's images section
-        if let generatedImage = viewModel.generatedImage {
-            userGeneratedImages.append(generatedImage)
-        }
+        // No need to append the generated image here since it's handled in the view model
     }
     
     func saveImageToPhotoLibrary() {
