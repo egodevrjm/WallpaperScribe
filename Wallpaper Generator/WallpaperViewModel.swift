@@ -4,12 +4,11 @@ import FalClient
 @MainActor
 class WallpaperViewModel: ObservableObject {
     @Published var keyword: String = ""
-     @Published var selectedBackground: BackgroundStyle?
-     @Published var isGenerating: Bool = false
-     @Published var generatedImage: UIImage?
-     @Published var showErrorAlert: Bool = false
-     @Published var errorMessage: String = ""
-
+    @Published var selectedBackground: BackgroundStyle?
+    @Published var isGenerating: Bool = false
+    @Published var generatedImage: UIImage?
+    @Published var showErrorAlert: Bool = false
+    @Published var errorMessage: String = ""
 
     private let fal: any Client
 
@@ -19,11 +18,11 @@ class WallpaperViewModel: ObservableObject {
     }
 
     func generateWallpaper() async {
-            guard !keyword.isEmpty else { return }
-            isGenerating = true
+        guard !keyword.isEmpty else { return }
+        isGenerating = true
 
-            do {
-                let prompt = refinePrompt()
+        do {
+            let prompt = refinePrompt()
             let payload = Payload.dict([
                 "prompt": .string(prompt),
                 "image_size": .string("portrait_16_9"),
@@ -50,8 +49,10 @@ class WallpaperViewModel: ObservableObject {
                 let (data, _) = try await URLSession.shared.data(from: imageUrl)
                 if let uiImage = UIImage(data: data) {
                     DispatchQueue.main.async {
-                                      self.generatedImage = uiImage
-                                  }
+                        // Update the generatedImage and selectedBackground with the new image
+                        self.generatedImage = uiImage
+                        self.selectedBackground = BackgroundStyle(name: "Generated Image", image: uiImage)
+                    }
                 } else {
                     throw NSError(domain: "ImageProcessing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
                 }
@@ -60,26 +61,26 @@ class WallpaperViewModel: ObservableObject {
             }
         } catch {
             DispatchQueue.main.async {
-                          self.errorMessage = error.localizedDescription
-                          self.showErrorAlert = true
-                      }
+                self.errorMessage = error.localizedDescription
+                self.showErrorAlert = true
+            }
         }
-        
+
         DispatchQueue.main.async {
-                    self.isGenerating = false
-                }    }
-    
+            self.isGenerating = false
+        }
+    }
 
     func refinePrompt() -> String {
-         var refinedPrompt = keyword
-         if let background = selectedBackground {
-             refinedPrompt += ", background: \(background.name)"
-         }
-         refinedPrompt += ", vertical orientation, full-screen composition"
-         return refinedPrompt
-     }
+        var refinedPrompt = keyword
+        if let background = selectedBackground {
+            refinedPrompt += ", background: \(background.name)"
+        }
+        refinedPrompt += ", vertical orientation, full-screen composition"
+        return refinedPrompt
+    }
 
-     func regenerateWallpaper() async {
-         await generateWallpaper()
-     }
- }
+    func regenerateWallpaper() async {
+        await generateWallpaper()
+    }
+}

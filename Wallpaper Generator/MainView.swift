@@ -8,9 +8,7 @@ struct MainView: View {
     @State private var saveError: Error?
     @FocusState private var isInputFocused: Bool
     @State private var backgroundOpacity: Double = 1.0
-    @AppStorage("userGeneratedImages") private var userGeneratedImagesData: Data = Data() // For persisting generated images
-    @State private var userGeneratedImages: [UIImage] = [] // Array to load generated images
-    @State private var selectedBackground: BackgroundStyle? // Track selected background
+    @State private var userGeneratedImages: [UIImage] = [] // Store generated wallpapers
     
     var body: some View {
         NavigationView {
@@ -18,26 +16,24 @@ struct MainView: View {
                 ZStack(alignment: .top) {
                     // Background Image (either default or generated)
                     Group {
-                        if let selectedBackground = selectedBackground {
-                            if let image = selectedBackground.image {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .ignoresSafeArea() // Ensure the image fills the entire view
-                            } else if let imageName = selectedBackground.imageName {
-                                Image(imageName)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .ignoresSafeArea() // Ensure the image fills the entire view
-                            }
+                        if let generatedImage = viewModel.generatedImage {
+                            Image(uiImage: generatedImage)
+                                .resizable()
+                                .scaledToFill() // Ensure image fills entire view
+                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
+                        } else if let selectedBackground = viewModel.selectedBackground {
+                            Image(selectedBackground.imageName ?? "sunset_mountain")
+                                .resizable()
+                                .scaledToFill() // Ensure image fills entire view
+                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
                         } else {
                             Image("sunset_mountain") // Default image
                                 .resizable()
-                                .scaledToFill()
-                                .ignoresSafeArea() // Ensure the image fills the entire view
+                                .scaledToFill() // Ensure image fills entire view
+                                .ignoresSafeArea() // Ensures image ignores the safe area, filling the entire view
                         }
                     }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(width: geometry.size.width, height: geometry.size.height) // Frame ensures the image fills the geometry size
 
                     // Semi-transparent overlay for better text visibility
                     Color.black.opacity(0.3)
@@ -105,26 +101,47 @@ struct MainView: View {
                         }
                     }
                 }
-                .sheet(isPresented: $showBackgroundSelection) {
-                    BackgroundSelectionView(selectedBackground: $selectedBackground, userGeneratedImages: $userGeneratedImages)
-                }
-                .alert(isPresented: $viewModel.showErrorAlert) {
-                    Alert(title: Text("Error"), message: Text(viewModel.errorMessage), dismissButton: .default(Text("OK")))
-                }
-                .alert(isPresented: $showSaveAlert) {
-                    if let error = saveError {
-                        return Alert(title: Text("Error"), message: Text(error.localizedDescription), dismissButton: .default(Text("OK")))
-                    } else {
-                        return Alert(title: Text("Success"), message: Text("Image saved to Photo Library."), dismissButton: .default(Text("OK")))
+                
+                // Display generated images in a separate section
+                if !userGeneratedImages.isEmpty {
+                    VStack(alignment: .leading) {
+                        Text("Your Generated Wallpapers")
+                            .font(.headline)
+                            .padding(.leading, 16)
+                        
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(userGeneratedImages, id: \.self) { image in
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 150, height: 150)
+                                        .cornerRadius(10)
+                                        .shadow(radius: 5)
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
                     }
+                    .padding(.top, 20)
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .navigationTitle("") // Empty title to prevent showing the text
-            .onAppear {
-                loadGeneratedImages()
+            .sheet(isPresented: $showBackgroundSelection) {
+                BackgroundSelectionView(selectedBackground: $viewModel.selectedBackground, userGeneratedImages: $userGeneratedImages)
+            }
+            .alert(isPresented: $viewModel.showErrorAlert) {
+                Alert(title: Text("Error"), message: Text(viewModel.errorMessage), dismissButton: .default(Text("OK")))
+            }
+            .alert(isPresented: $showSaveAlert) {
+                if let error = saveError {
+                    return Alert(title: Text("Error"), message: Text(error.localizedDescription), dismissButton: .default(Text("OK")))
+                } else {
+                    return Alert(title: Text("Success"), message: Text("Image saved to Photo Library."), dismissButton: .default(Text("OK")))
+                }
             }
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("") // Empty title to prevent showing the text
     }
     
     private func generateWallpaperWithAnimation() async {
@@ -138,22 +155,10 @@ struct MainView: View {
             backgroundOpacity = 1.0
         }
         
-        // After generating the wallpaper, add it to the user's images section and persist it
+        // After generating the wallpaper, add it to the user's images section
         if let generatedImage = viewModel.generatedImage {
             userGeneratedImages.append(generatedImage)
-            saveGeneratedImages()
-            selectedBackground = BackgroundStyle(name: "Generated Image", image: generatedImage) // Automatically set as the background
         }
-    }
-    
-    private func loadGeneratedImages() {
-        if let loadedImages = UIImage.convertDataArrayToImages(dataArray: userGeneratedImagesData) {
-            userGeneratedImages = loadedImages
-        }
-    }
-    
-    private func saveGeneratedImages() {
-        userGeneratedImagesData = UIImage.convertImagesToDataArray(images: userGeneratedImages)
     }
     
     func saveImageToPhotoLibrary() {
