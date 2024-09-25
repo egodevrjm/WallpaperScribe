@@ -8,12 +8,14 @@ struct MainView: View {
     @State private var saveError: Error?
     @FocusState private var isInputFocused: Bool
     @State private var backgroundOpacity: Double = 1.0
-
+    @State private var showSettingsView = false
+    @AppStorage("showGeneratedImages") private var showGeneratedImages: Bool = true
+    @State private var backgroundBlur: CGFloat = 0.0
+    
     var body: some View {
         NavigationView {
             GeometryReader { geometry in
                 ZStack(alignment: .top) {
-                    // Background Image
                     Group {
                         if let selectedBackground = viewModel.selectedBackground {
                             if let image = selectedBackground.image {
@@ -21,21 +23,30 @@ struct MainView: View {
                                     .resizable()
                                     .scaledToFill()
                                     .ignoresSafeArea()
+                                    .opacity(backgroundOpacity) // Bind opacity
+                                    .blur(radius: backgroundBlur) // Bind blur effect
                             } else if let imageName = selectedBackground.imageName {
                                 Image(imageName)
                                     .resizable()
                                     .scaledToFill()
                                     .ignoresSafeArea()
+                                    .opacity(backgroundOpacity) // Bind opacity
+                                    .blur(radius: backgroundBlur) // Bind blur effect
                             }
                         } else {
                             Image("sunset_mountain")
                                 .resizable()
                                 .scaledToFill()
                                 .ignoresSafeArea()
+                                .opacity(backgroundOpacity) // Bind opacity
+                                .blur(radius: backgroundBlur) // Bind blur effect
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
-
+                    .onTapGesture {
+                        isInputFocused = false // Dismiss keyboard when tapping outside
+                    } // Add tap gesture here
+                    
                     // Semi-transparent overlay for better text visibility
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
@@ -46,7 +57,8 @@ struct MainView: View {
                         // Main Content
                         VStack(spacing: 20) {
                             Text("Generate Wallpaper")
-                                .font(.system(size: 32, weight: .bold))
+                                .font(.custom("Modern Deco", size: 32)) // Use the custom Modern Deco font
+                                .fontWeight(.bold)
                                 .foregroundColor(.white)
                                 .padding(.bottom, 20)
                             
@@ -57,7 +69,7 @@ struct MainView: View {
                                 TextField("Enter a keyword", text: $viewModel.keyword)
                                     .foregroundColor(.white)
                                     .accentColor(.white)
-                                    .focused($isInputFocused)
+                                    .focused($isInputFocused) // Add focused state binding
                             }
                             .padding()
                             .background(Color.white.opacity(0.2))
@@ -79,32 +91,50 @@ struct MainView: View {
                                     .cornerRadius(15)
                             }
                             .padding(.horizontal, 40)
-                            .disabled(viewModel.isGenerating)
+                            .disabled(viewModel.isGenerating || !viewModel.isApiKeySet)
                         }
                         .padding(.bottom, 50)
                     }
                 }
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItem(placement: .navigationBarLeading) {
                         Button(action: {
-                            showBackgroundSelection = true
+                            showSettingsView = true
                         }) {
-                            Image(systemName: "photo")
+                            Image(systemName: "gearshape")
+                                .resizable()
+                                .frame(width: 24, height: 24)
+                                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
                         }
                     }
+                    
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        if viewModel.generatedImage != nil {
+                        HStack(spacing: 20) {
                             Button(action: {
-                                saveImageToPhotoLibrary()
+                                showBackgroundSelection = true
+                            }) {
+                                Image(systemName: "photo")
+                                    .resizable()
+                                    .frame(width: 24, height: 24)
+                                    .alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
+                            }
+                            
+                            // Save button is always displayed
+                            Button(action: {
+                                saveImageToPhotoLibrary() // Save the current background
                             }) {
                                 Image(systemName: "square.and.arrow.down")
+                                    .resizable()
+                                    .frame(width: 24, height: 24)
+                                    .alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
+                                    .offset(y: -2)
                             }
                         }
                     }
                 }
                 
-                // Display generated images in a separate section
-                if !viewModel.userGeneratedBackgrounds.isEmpty {
+                // Display generated images in a separate section if enabled
+                if showGeneratedImages && !viewModel.userGeneratedBackgrounds.isEmpty {
                     VStack(alignment: .leading) {
                         Text("Your Generated Wallpapers")
                             .font(.headline)
@@ -149,6 +179,14 @@ struct MainView: View {
                     removeGeneratedImage: viewModel.removeGeneratedImage(withId:)
                 )
             }
+            .sheet(isPresented: $showSettingsView, onDismiss: {
+                // Reload API key in view model
+                if let newApiKey = KeychainHelper.shared.getApiKey() {
+                    viewModel.updateApiKey(newApiKey)
+                }
+            }) {
+                SettingsView()
+            }
             .alert(isPresented: $viewModel.showErrorAlert) {
                 Alert(title: Text("Error"), message: Text(viewModel.errorMessage), dismissButton: .default(Text("OK")))
             }
@@ -159,27 +197,52 @@ struct MainView: View {
                     return Alert(title: Text("Success"), message: Text("Image saved to Photo Library."), dismissButton: .default(Text("OK")))
                 }
             }
+            .onAppear {
+                if !viewModel.isApiKeySet {
+                    showSettingsView = true
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .navigationTitle("") // Empty title to prevent showing the text
         }
     }
     
     private func generateWallpaperWithAnimation() async {
-        withAnimation(Animation.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-            backgroundOpacity = 0.5
+        // Reduce opacity slightly and apply blur with more prominent effect
+        withAnimation(Animation.easeInOut(duration: 1.0)) {
+            backgroundOpacity = 0.7
+            backgroundBlur = 10.0 // Apply larger blur to emphasize the animation
         }
         
         await viewModel.generateWallpaper()
         
-        withAnimation {
+        // Reset blur and opacity once wallpaper generation completes
+        withAnimation(Animation.easeOut(duration: 1.0)) {
             backgroundOpacity = 1.0
+            backgroundBlur = 0.0 // Smoothly remove blur effect
         }
-        
-        // No need to append the generated image here since it's handled in the view model
     }
     
+    
     func saveImageToPhotoLibrary() {
-        guard let image = viewModel.generatedImage else { return }
+        var imageToSave: UIImage?
+        
+        // Check if the current background is a generated image or static
+        if let selectedBackground = viewModel.selectedBackground {
+            if let image = selectedBackground.image {
+                // Generated image
+                imageToSave = image
+            } else if let imageName = selectedBackground.imageName {
+                // Static image (use UIImage(named:) to get the image from the asset catalog)
+                imageToSave = UIImage(named: imageName)
+            }
+        } else {
+            // Default fallback (e.g., "sunset_mountain")
+            imageToSave = UIImage(named: "sunset_mountain")
+        }
+        
+        // Proceed to save the image if available
+        guard let image = imageToSave else { return }
         
         PHPhotoLibrary.requestAuthorization { status in
             switch status {
@@ -205,7 +268,7 @@ struct MainView: View {
                     self.showSaveAlert = true
                 }
             case .notDetermined:
-                // This shouldn't happen, but if it does, we can try requesting authorization again
+                // Retry authorization
                 self.saveImageToPhotoLibrary()
             @unknown default:
                 DispatchQueue.main.async {
