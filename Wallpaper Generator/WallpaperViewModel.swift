@@ -9,84 +9,57 @@ class WallpaperViewModel: ObservableObject {
     @Published var generatedImage: UIImage?
     @Published var showErrorAlert: Bool = false
     @Published var errorMessage: String = ""
+    
+    private var fal: (any Client)?
+    private var apiKey: String?
+    
+    var isApiKeySet: Bool {
+         return apiKey != nil && !apiKey!.isEmpty
+     }
+    
+    // Existing properties...
     @Published var userGeneratedBackgrounds: [BackgroundStyle] = []
     private var userGeneratedImageFilenames: [String] = []
-
-
-    private let fal: any Client
-
+    
     init() {
-        // Make sure to replace "YOUR_API_KEY" with your actual API key
-        self.fal = FalClient.withCredentials(.keyPair("API-KEY"))
+        loadApiKey()
+        initializeFalClient()
+        
+        // Load images from disk when the view model is initialized
         loadFilenames()
         loadGeneratedImages()
     }
     
-    func saveGeneratedImage(_ image: UIImage) -> BackgroundStyle? {
-        let filename = UUID().uuidString + ".jpg"
-        let url = getDocumentsDirectory().appendingPathComponent(filename)
-
-        if let data = image.jpegData(compressionQuality: 1.0) {
-            do {
-                try data.write(to: url)
-                userGeneratedImageFilenames.append(filename)
-                saveFilenames()
-
-                // Create a BackgroundStyle with the saved image and UUID
-                let id = UUID(uuidString: filename.replacingOccurrences(of: ".jpg", with: "")) ?? UUID()
-                let backgroundStyle = BackgroundStyle(name: "Generated Image", image: image, id: id)
-
-                // Update the published arrays
-                userGeneratedBackgrounds.append(backgroundStyle)
-
-                return backgroundStyle
-            } catch {
-                print("Error saving image: \(error)")
-            }
-        }
-        return nil
+    private func loadApiKey() {
+        apiKey = KeychainHelper.shared.getApiKey()
     }
-
-        func loadGeneratedImages() {
-            userGeneratedBackgrounds = userGeneratedImageFilenames.compactMap { filename in
-                let url = getDocumentsDirectory().appendingPathComponent(filename)
-                if let image = UIImage(contentsOfFile: url.path) {
-                    return BackgroundStyle(name: "Generated Image", image: image, id: UUID(uuidString: filename) ?? UUID())
-                }
-                return nil
-            }
+    
+    private func initializeFalClient() {
+        if let apiKey = apiKey, !apiKey.isEmpty {
+            fal = FalClient.withCredentials(.keyPair(apiKey))
+        } else {
+            fal = nil
         }
-       // Save the filenames array to disk
-       func saveFilenames() {
-           let url = getDocumentsDirectory().appendingPathComponent("filenames.json")
-           do {
-               let data = try JSONEncoder().encode(userGeneratedImageFilenames)
-               try data.write(to: url)
-           } catch {
-               print("Error saving filenames: \(error)")
-           }
-       }
-
-       // Load the filenames array from disk
-       func loadFilenames() {
-           let url = getDocumentsDirectory().appendingPathComponent("filenames.json")
-           do {
-               let data = try Data(contentsOf: url)
-               userGeneratedImageFilenames = try JSONDecoder().decode([String].self, from: data)
-           } catch {
-               print("Error loading filenames: \(error)")
-           }
-       }
-
-       // Helper method to get the documents directory
-       func getDocumentsDirectory() -> URL {
-           FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-       }
-
+    }
+    
+    func updateApiKey(_ newApiKey: String) {
+        apiKey = newApiKey
+        initializeFalClient()
+    }
+    
     func generateWallpaper() async {
         guard !keyword.isEmpty else { return }
         isGenerating = true
-
+        
+        guard let fal = fal else {
+            DispatchQueue.main.async {
+                self.errorMessage = "API client not configured. Please set your API key in Settings."
+                self.showErrorAlert = true
+                self.isGenerating = false
+            }
+            return
+        }
+        
         do {
             let prompt = refinePrompt()
             let payload = Payload.dict([
@@ -96,7 +69,7 @@ class WallpaperViewModel: ObservableObject {
                 "num_images": .int(1),
                 "enable_safety_checker": .bool(true)
             ])
-
+            
             let result = try await fal.subscribe(
                 to: "fal-ai/flux/schnell",
                 input: payload,
@@ -106,7 +79,7 @@ class WallpaperViewModel: ObservableObject {
                     print("Generation Logs: \(logs)")
                 }
             }
-
+            
             if case let .dict(resultDict) = result,
                case let .array(images)? = resultDict["images"],
                case let .dict(firstImage)? = images.first,
@@ -126,8 +99,9 @@ class WallpaperViewModel: ObservableObject {
                             self.showErrorAlert = true
                         }
                     }
+                } else {
+                    throw NSError(domain: "ImageProcessing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from data"])
                 }
-
             } else {
                 throw NSError(domain: "ResultProcessing", code: 0, userInfo: [NSLocalizedDescriptionKey: "Failed to process result"])
             }
@@ -137,12 +111,78 @@ class WallpaperViewModel: ObservableObject {
                 self.showErrorAlert = true
             }
         }
-
+        
         DispatchQueue.main.async {
             self.isGenerating = false
         }
     }
-
+    
+    func saveGeneratedImage(_ image: UIImage) -> BackgroundStyle? {
+        let uuid = UUID()
+        let filename = uuid.uuidString + ".jpg"
+        let url = getDocumentsDirectory().appendingPathComponent(filename)
+        
+        if let data = image.jpegData(compressionQuality: 1.0) {
+            do {
+                try data.write(to: url)
+                userGeneratedImageFilenames.append(filename)
+                saveFilenames()
+                
+                // Create a BackgroundStyle with the saved image
+                let backgroundStyle = BackgroundStyle(name: "Generated Image", image: image, id: uuid)
+                userGeneratedBackgrounds.append(backgroundStyle)
+                return backgroundStyle
+            } catch {
+                print("Error saving image: \(error)")
+            }
+        }
+        return nil
+    }
+    
+    func loadGeneratedImages() {
+        userGeneratedBackgrounds = userGeneratedImageFilenames.compactMap { filename in
+            let url = getDocumentsDirectory().appendingPathComponent(filename)
+            if let image = UIImage(contentsOfFile: url.path),
+               let id = UUID(uuidString: filename.replacingOccurrences(of: ".jpg", with: "")) {
+                return BackgroundStyle(name: "Generated Image", image: image, id: id)
+            } else {
+                print("Invalid UUID string in filename: \(filename)")
+                // Optionally handle the error, e.g., remove the filename from the array
+                return nil
+            }
+        }
+    }
+    
+    // Save the filenames array to disk
+    func saveFilenames() {
+        let url = getDocumentsDirectory().appendingPathComponent("filenames.json")
+        do {
+            let data = try JSONEncoder().encode(userGeneratedImageFilenames)
+            try data.write(to: url)
+        } catch {
+            print("Error saving filenames: \(error)")
+        }
+    }
+    
+    func loadFilenames() {
+        let url = getDocumentsDirectory().appendingPathComponent("filenames.json")
+        do {
+            let data = try Data(contentsOf: url)
+            let filenames = try JSONDecoder().decode([String].self, from: data)
+            // Filter out invalid filenames
+            userGeneratedImageFilenames = filenames.filter { filename in
+                UUID(uuidString: filename.replacingOccurrences(of: ".jpg", with: "")) != nil
+            }
+        } catch {
+            print("Error loading filenames: \(error)")
+        }
+    }
+    
+    // Helper method to get the documents directory
+    func getDocumentsDirectory() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    
     func refinePrompt() -> String {
         var refinedPrompt = keyword
         if let background = selectedBackground {
@@ -151,11 +191,10 @@ class WallpaperViewModel: ObservableObject {
         refinedPrompt += ", vertical orientation, full-screen composition"
         return refinedPrompt
     }
-
+    
     func regenerateWallpaper() async {
         await generateWallpaper()
     }
-    
     
     func removeGeneratedImage(withId id: UUID) {
         let filename = id.uuidString + ".jpg"
@@ -167,6 +206,8 @@ class WallpaperViewModel: ObservableObject {
             if let index = userGeneratedImageFilenames.firstIndex(of: filename) {
                 userGeneratedImageFilenames.remove(at: index)
                 saveFilenames()
+            } else {
+                print("Filename not found in the list: \(filename)")
             }
             // Remove the background style from the array
             if let index = userGeneratedBackgrounds.firstIndex(where: { $0.id == id }) {
@@ -180,5 +221,4 @@ class WallpaperViewModel: ObservableObject {
             print("Error removing image: \(error)")
         }
     }
-
 }
