@@ -17,7 +17,7 @@ class WallpaperViewModel: ObservableObject {
 
     init() {
         // Make sure to replace "YOUR_API_KEY" with your actual API key
-        self.fal = FalClient.withCredentials(.keyPair("b45528c0-13b0-4ea6-9568-ce72cce22c43:c5bcc1b57e069329561af8e7c1c08d34"))
+        self.fal = FalClient.withCredentials(.keyPair("API-KEY"))
         loadFilenames()
         loadGeneratedImages()
     }
