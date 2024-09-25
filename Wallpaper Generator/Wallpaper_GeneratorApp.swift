@@ -11,7 +11,7 @@ import SwiftUI
 struct Wallpaper_GeneratorApp: App {
     var body: some Scene {
         WindowGroup {
-            MainView()
+            SplashView()
         }
     }
 }
